@@ -57,7 +57,7 @@ def get_args():
     """
     Supports the command-line arguments listed below.
     function to parse through args for connecting to ESXi host or
-    vCenter server function taken from getallvms.py script
+    vCenter server function taken from getallvms_v1.py script
     from pyvmomi github repo
     """
     parser = argparse.ArgumentParser(
@@ -156,7 +156,7 @@ def getvm_info(vm, depth=1):
     """
     Print information for a particular virtual machine or recurse
     into a folder with depth protection
-    from the getallvms.py script from pyvmomi from github repo
+    from the getallvms_v1.py script from pyvmomi from github repo
     """
     maxdepth = 10
 
@@ -202,7 +202,7 @@ def find_match(uuid):
 def main():
     """
     function runs all of the other functions. Some parts of this function
-    are taken from the getallvms.py script from the pyvmomi gihub repo
+    are taken from the getallvms_v1.py script from the pyvmomi gihub repo
     """
     args = get_args()
     try:

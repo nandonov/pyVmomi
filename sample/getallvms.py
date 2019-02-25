@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # VMware vSphere Python SDK
-# Copyright (c) 2008-2015 VMware, Inc. All Rights Reserved.
+# Copyright (c) 2008-2013 VMware, Inc. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,112 +18,85 @@
 Python program for listing the vms on an ESX / vCenter host
 """
 
-from __future__ import print_function
+import atexit
 
-from pyVim.connect import SmartConnect, Disconnect
+from pyVim import connect
+from pyVmomi import vmodl
 from pyVmomi import vim
 
-import argparse
-import atexit
-import getpass
-import ssl
+import tools.cli as cli
 
-def GetArgs():
-   """
-   Supports the command-line arguments listed below.
-   """
-   parser = argparse.ArgumentParser(
-       description='Process args for retrieving all the Virtual Machines')
-   parser.add_argument('-s', '--host', required=True, action='store',
-                       help='Remote host to connect to')
-   parser.add_argument('-o', '--port', type=int, default=443, action='store',
-                       help='Port to connect on')
-   parser.add_argument('-u', '--user', required=True, action='store',
-                       help='User name to use when connecting to host')
-   parser.add_argument('-p', '--password', required=False, action='store',
-                       help='Password to use when connecting to host')
-   args = parser.parse_args()
-   return args
+def print_vm_info(virtual_machine):
+    """
+    Print information for a particular virtual machine or recurse into a
+    folder with depth protection
+    """
+    summary = virtual_machine.summary
+    print("Name       : ", summary.config.name)
+    print("Template   : ", summary.config.template)
+    print("Path       : ", summary.config.vmPathName)
+    print("Guest      : ", summary.config.guestFullName)
+    print("Instance UUID : ", summary.config.instanceUuid)
+    print("Bios UUID     : ", summary.config.uuid)
+    annotation = summary.config.annotation
+    if annotation:
+        print("Annotation : ", annotation)
+    print("State      : ", summary.runtime.powerState)
+    if summary.guest is not None:
+        ip_address = summary.guest.ipAddress
+        tools_version = summary.guest.toolsStatus
+        if tools_version is not None:
+            print("VMware-tools: ", tools_version)
+        else:
+            print("Vmware-tools: None")
+        if ip_address:
+            print("IP         : ", ip_address)
+        else:
+            print("IP         : None")
+    if summary.runtime.question is not None:
+        print("Question  : ", summary.runtime.question.text)
+    print("")
 
-
-def PrintVmInfo(vm, depth=1):
-   """
-   Print information for a particular virtual machine or recurse into a folder
-   or vApp with depth protection
-   """
-   maxdepth = 10
-
-   # if this is a group it will have children. if it does, recurse into them
-   # and then return
-   if hasattr(vm, 'childEntity'):
-      if depth > maxdepth:
-         return
-      vmList = vm.childEntity
-      for c in vmList:
-         PrintVmInfo(c, depth+1)
-      return
-
-   # if this is a vApp, it likely contains child VMs
-   # (vApps can nest vApps, but it is hardly a common usecase, so ignore that)
-   if isinstance(vm, vim.VirtualApp):
-      vmList = vm.vm
-      for c in vmList:
-         PrintVmInfo(c, depth + 1)
-      return
-
-   summary = vm.summary
-   print("Name       : ", summary.config.name)
-   print("Path       : ", summary.config.vmPathName)
-   print("Guest      : ", summary.config.guestFullName)
-   annotation = summary.config.annotation
-   if annotation != None and annotation != "":
-      print("Annotation : ", annotation)
-   print("State      : ", summary.runtime.powerState)
-   if summary.guest != None:
-      ip = summary.guest.ipAddress
-      if ip != None and ip != "":
-         print("IP         : ", ip)
-   if summary.runtime.question != None:
-      print("Question  : ", summary.runtime.question.text)
-   print("")
 
 def main():
-   """
-   Simple command-line program for listing the virtual machines on a system.
-   """
+    """
+    Simple command-line program for listing the virtual machines on a system.
+    """
 
-   args = GetArgs()
-   if args.password:
-      password = args.password
-   else:
-      password = getpass.getpass(prompt='Enter password for host %s and '
-                                        'user %s: ' % (args.host,args.user))
+    args = cli.get_args()
 
-   context = None
-   if hasattr(ssl, '_create_unverified_context'):
-      context = ssl._create_unverified_context()
-   si = SmartConnect(host=args.host,
-                     user=args.user,
-                     pwd=password,
-                     port=int(args.port),
-                     sslContext=context)
-   if not si:
-       print("Could not connect to the specified host using specified "
-             "username and password")
-       return -1
+    try:
+        if args.disable_ssl_verification:
+            service_instance = connect.SmartConnectNoSSL(host=args.host,
+                                                         user=args.user,
+                                                         pwd=args.password,
+                                                         port=int(args.port))
+        else:
+            service_instance = connect.SmartConnect(host=args.host,
+                                                    user=args.user,
+                                                    pwd=args.password,
+                                                    port=int(args.port))
 
-   atexit.register(Disconnect, si)
+        atexit.register(connect.Disconnect, service_instance)
 
-   content = si.RetrieveContent()
-   for child in content.rootFolder.childEntity:
-      if hasattr(child, 'vmFolder'):
-         datacenter = child
-         vmFolder = datacenter.vmFolder
-         vmList = vmFolder.childEntity
-         for vm in vmList:
-            PrintVmInfo(vm)
-   return 0
+        content = service_instance.RetrieveContent()
+
+        container = content.rootFolder  # starting point to look into
+        viewType = [vim.VirtualMachine]  # object types to look for
+        recursive = True  # whether we should look into it recursively
+        containerView = content.viewManager.CreateContainerView(
+            container, viewType, recursive)
+
+        children = containerView.view
+        for child in children:
+            print_vm_info(child)
+
+    except vmodl.MethodFault as error:
+        print("Caught vmodl fault : " + error.msg)
+        return -1
+
+    return 0
 
 # Start program
 if __name__ == "__main__":
-   main()
+    main()
